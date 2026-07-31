@@ -81,6 +81,7 @@
     </div>
 </div>
 
+<script src="js/airports.js"></script>
 <script>
     const defaultDictObj = {
         "TEMPORARY DANGER AREA ESTABLISHED": "УСТАНОВЛЕНА ВРЕМЕННАЯ ОПАСНАЯ ЗОНА",
@@ -123,16 +124,6 @@
         "AGL": "НАД УРОВНЕМ ЗЕМЛИ",
         "ACT": "АКТИВЕН / ДЕЙСТВУЕТ",
         "WI": "В РАДИУСЕ / В ПРЕДЕЛАХ"
-    };
-
-    const airportICAO = {
-        "UUEE": "Шереметьево (Москва, Россия)",
-        "UUDD": "Домодедово (Москва, Россия)",
-        "UUWW": "Внуково (Москва, Россия)",
-        "ULLI": "Пулково (Санкт-Петербург, Россия)",
-        "URSS": "Сочи / Адлер (Россия)",
-        "USSS": "Кольцово (Екатеринбург, Россия)",
-        "UNNT": "Толмачево (Новосибирск, Россия)"
     };
 
     let activeDictObj = { ...defaultDictObj };
@@ -320,19 +311,32 @@ async function autoFetchDictionary() {
         return trans;
     }
 
-    function extractAirports(text) {
-        const regex = /\bA\)\s*([A-Z0-9]{4})\b/gi;
-        let match = regex.exec(text);
-        let airports = [];
+    function extractLocations(text) {
 
-        while (match !== null) {
-            const code = match[1];
-            const info = airportICAO[code] || "Наименование аэродрома / FIR отсутствует в базе";
-            airports.push({ code, info });
-            match = regex.exec(text);
-        }
-        return airports;
+    const locations = [];
+
+    // Ищем все коды между A) и B)
+    const match = text.match(/\bA\)\s*(.+?)\s*B\)/i);
+
+    if (!match) {
+        return locations;
     }
+
+    const codes = match[1]
+        .trim()
+        .split(/\s+/);
+
+    codes.forEach(code => {
+
+        locations.push({
+            code: code,
+            info: airportICAO[code] || "Наименование аэродрома / FIR отсутствует в базе"
+        });
+
+    });
+
+    return locations;
+}
 
     function selectNOTAM(id) {
         document.querySelectorAll('.notam-card').forEach(el => el.classList.remove('selected'));
@@ -348,15 +352,19 @@ async function autoFetchDictionary() {
 
         const detailContainer = document.getElementById('detailView');
         
-        let airportsHtml = item.airports.map(a => 
-            `<div><span class="airport-tag">${a.code}</span> — <b>${a.info}</b></div>`
-        ).join('') || '<i>Код аэродрома (поле A) не найден</i>';
+	let locationsHtml = item.locations.map(l => `
+    		<div style="margin-bottom:6px;">
+        	<span class="airport-tag">${l.code}</span>
+        	<span style="margin-left:8px;">${l.info}</span>
+    	</div>
+`	).join('') || '<i>Код аэродрома / FIR отсутствует</i>';
+
 
         detailContainer.innerHTML = `
             <div class="detail-box">
                 <div class="detail-section">
-                    <div class="detail-title">📍 Аэродром / Зона ответственности</div>
-                    ${airportsHtml}
+                    <div class="detail-title">📍 ICAO-коды (поле A)</div>
+                    ${locationsHtml}
                 </div>
 
                 <div class="detail-section">
@@ -412,14 +420,14 @@ async function autoFetchDictionary() {
 
                 const translated = translateNOTAMFull(rowText);
                 const coords = parseCoordinates(rowText);
-                const airports = extractAirports(rowText);
+                const locations = extractLocations(rowText);
 
                 parsedNotams.push({
                     id: notamId,
                     original: rowText,
                     translated: translated,
                     coords: coords,
-                    airports: airports
+                    locations: locations
                 });
 
                 const badgeHtml = coords 
