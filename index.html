@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>NOTAM Анализатор — С внешней базой терминов (JSON)</title>
+    <!-- Leaflet (карта) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- SheetJS (Excel) -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 15px; background: #eef2f5; color: #333; }
+        h2 { margin-top: 0; color: #1a365d; font-size: 20px; }
+        
+        .top-bar {
+            background: white;
+            padding: 15px 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            margin-bottom: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .controls-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            background: #3182ce;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            display: inline-block;
+            transition: background 0.2s;
+            border: none;
+            font-size: 13px;
+        }
+
+        .btn:hover { background: #2b6cb0; }
+        .btn-secondary { background: #4a5568; }
+        .btn-secondary:hover { background: #2d3748; }
+        .btn-success { background: #38a169; }
+        .btn-success:hover { background: #2f855a; }
+
+        input[type="file"] { display: none; }
+
+        .keywords-box { display: flex; flex-direction: column; gap: 5px; width: 100%; }
+
+        input[type="text"], textarea {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #cbd5e0;
+            border-radius: 6px;
+            font-size: 13px;
+            font-family: inherit;
+        }
+
+        .container { display: flex; gap: 15px; height: 72vh; }
+        
+        .panel-list { 
+            flex: 1.1; 
+            background: white; 
+            padding: 15px; 
+            border-radius: 10px; 
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08); 
+            display: flex; 
+            flex-direction: column; 
+        }
+
+        .panel-detail { 
+            flex: 1.2; 
+            background: white; 
+            padding: 15px; 
+            border-radius: 10px; 
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08); 
+            display: flex; 
+            flex-direction: column; 
+            overflow-y: auto;
+        }
+
+        .panel-map { 
+            flex: 1; 
+            background: white; 
+            padding: 15px; 
+            border-radius: 10px; 
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08); 
+            display: flex; 
+            flex-direction: column; 
+        }
+
+        #map { flex: 1; border-radius: 8px; border: 1px solid #e2e8f0; }
+
+        .notam-list-container {
+            flex: 1;
+            overflow-y: auto;
+            margin-top: 10px;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            background: #fafbfc;
+            padding: 8px;
+        }
+
+        .panel-header {
+            font-weight: bold;
+            font-size: 14px;
+            color: #2b6cb0;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #cbd5e0;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .notam-card { 
+            background: #ffffff; 
+            border-left: 4px solid #cbd5e0; 
+            padding: 10px; 
+            margin-bottom: 8px; 
+            font-size: 12px;
+            line-height: 1.45;
+            border-radius: 0 5px 5px 0;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            white-space: pre-wrap;
+            font-family: 'Consolas', 'Courier New', monospace;
+        }
+
+        .notam-card:hover {
+            transform: translateX(3px);
+            box-shadow: 0 3px 6px rgba(0,0,0,0.12);
+            border-left-color: #3182ce;
+        }
+
+        .notam-card.selected {
+            border-left-color: #e53e3e !important;
+            background: #fff5f5 !important;
+            outline: 2px solid #feb2b2;
+        }
+
+        .detail-box {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        .detail-section {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 12px;
+        }
+
+        .detail-title {
+            font-size: 11px;
+            text-transform: uppercase;
+            font-weight: bold;
+            color: #718096;
+            margin-bottom: 6px;
+        }
+
+        .translated-text { color: #1a202c; line-height: 1.6; }
+
+        .airport-tag {
+            display: inline-block;
+            background: #ebf8ff;
+            color: #2b6cb0;
+            border: 1px solid #bee3f8;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: bold;
+            font-family: monospace;
+        }
+
+        .custom-term {
+            background-color: #ebf8ff;
+            color: #2b6cb0;
+            font-weight: bold;
+            padding: 0 3px;
+            border-radius: 3px;
+            border-bottom: 1px dashed #3182ce;
+        }
+
+        .highlight { background-color: #fefcbf; color: #744210; font-weight: bold; padding: 0 2px; border-radius: 2px; }
+        .status-bar { font-size: 14px; font-weight: 600; color: #2d3748; }
+        .file-name { font-size: 13px; color: #4a5568; }
+        .coords-badge { font-size: 10px; background: #c6f6d5; color: #22543d; padding: 2px 4px; border-radius: 3px; float: right; }
+        .no-coords-badge { font-size: 10px; background: #e2e8f0; color: #718096; padding: 2px 4px; border-radius: 3px; float: right; }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0; top: 0;
+            width: 100%; height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-content {
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            width: 650px;
+            max-width: 90%;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .dictionary-editor {
+            height: 250px;
+            resize: vertical;
+            font-family: monospace;
+            font-size: 12px;
+            line-height: 1.4;
+        }
+    </style>
+</head>
+<body>
+
+<h2>NOTAM Анализатор — Загрузка и сохранение файла словаря (dictionary.json)</h2>
+
+<div class="top-bar">
+    <div class="controls-row">
+        <label class="btn">
+            📂 Выбрать Excel / CSV
+            <input type="file" id="excelFile" accept=".xls,.xlsx,.csv" onchange="handleFileSelect(event)">
+        </label>
+
+        <button class="btn btn-secondary" onclick="openDictModal()">📖 Управление словарем (JSON)</button>
+
+        <span class="file-name" id="fileNameDisplay">Файл NOTAM не загружен</span>
+    </div>
+
+    <div class="keywords-box">
+        <label><b>Фильтр по ключевым словам (через запятую):</b></label>
+        <input type="text" id="keywords" value="GPS, JAMMING, MILITARY, DANGER, NAV, EXERCISE, UNMANNED, RESTRICTED, UAP, PROHIBITED" onchange="if(workbookData) parseAndDisplay();">
+    </div>
+</div>
+
+<div class="container">
+    <div class="panel-list">
+        <div class="status-bar">
+            Найдено NOTAM: <span id="count" style="color: #3182ce;">0</span>
+        </div>
+        <div class="notam-list-container" id="notamList">
+            <div style="color: #a0aec0; text-align: center; margin-top: 40px; font-size: 13px;">Загрузите файл для просмотра</div>
+        </div>
+    </div>
+
+    <div class="panel-detail">
+        <div class="panel-header">Подробная расшифровка и полный перевод</div>
+        <div id="detailView">
+            <div style="color: #a0aec0; text-align: center; margin-top: 40px; font-size: 13px;">Выберите NOTAM из списка слева</div>
+        </div>
+    </div>
+
+    <div class="panel-map">
+        <div class="panel-header">Карта местности</div>
+        <div id="map"></div>
+    </div>
+</div>
+
+<div id="dictModal" class="modal">
+    <div class="modal-content">
+        <h3 style="margin: 0; color: #1a365d;">Словарь терминов</h3>
+        <p style="font-size: 12px; color: #4a5568; margin: 0;">
+            Вы можете отредактировать список ниже и выгрузить его в файл <code>dictionary.json</code> рядом с программой.<br>
+            Формат: <code>СЛОВО_АНГЛ = ПЕРЕВОД_РУС</code>
+        </p>
+        
+        <div style="display: flex; gap: 10px;">
+            <label class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px;">
+                📥 Загрузить файл dictionary.json
+                <input type="file" id="dictFileInput" accept=".json" onchange="loadDictFromFile(event)">
+            </label>
+        </div>
+
+        <textarea id="dictInput" class="dictionary-editor"></textarea>
+        
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <button class="btn btn-secondary" onclick="resetDefaultDict()">Сбросить к дефолтному</button>
+            <div style="display: flex; gap: 8px;">
+                <button class="btn btn-success" onclick="downloadDictJson()">💾 Скачать dictionary.json</button>
+                <button class="btn" onclick="applyDictChanges()">Применить текущий</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const defaultDictObj = {
+        "TEMPORARY DANGER AREA ESTABLISHED": "УСТАНОВЛЕНА ВРЕМЕННАЯ ОПАСНАЯ ЗОНА",
+        "TEMPORARY RESTRICTED AREA ESTABLISHED": "УСТАНОВЛЕНА ВРЕМЕННАЯ ЗОНА ОГРАНИЧЕНИЯ ПОЛЕТОВ",
+        "TEMPORARY RESERVED AREA ESTABLISHED": "УСТАНОВЛЕНА ВРЕМЕННАЯ ЗАРЕЗЕРВИРОВАННАЯ ЗОНА",
+        "UNMANNED AIRCRAFT SYSTEM": "БЕСПИЛОТНАЯ АВИАЦИОННАЯ СИСТЕМА (БПЛА)",
+        "UNMANNED AIRCRAFT": "БЕСПИЛОТНЫЙ ЛЕТАТЕЛЬНЫЙ АППАРАТ (БПЛА)",
+        "GLOBAL POSITIONING SYSTEM": "ГЛОБАЛЬНАЯ НАВИГАЦИОННАЯ СПУТНИКОВАЯ СИСТЕМА (GPS)",
+        "TEMPORARY DANGER AREA": "ВРЕМЕННАЯ ОПАСНАЯ ЗОНА",
+        "TEMPORARY RESTRICTED AREA": "ВРЕМЕННАЯ ЗОНА ОГРАНИЧЕНИЯ ПОЛЕТОВ",
+        "AIRSPACE RESERVATION": "РЕЗЕРВИРОВАНИЕ ВОЗДУШНОГО ПРОСТРАНСТВА",
+        "SIGNAL INTERFERENCE": "ПОМЕХИ РАДИОСИГНАЛА / ГЛУШЕНИЕ",
+        "INSTRUMENT LANDING SYSTEM": "СИСТЕМА ИНСТРУМЕНТАЛЬНОЙ ПОСАДКИ (ILS)",
+        "MILITARY EXERCISE": "ВОЕННЫЕ УЧЕНИЯ",
+        "NAV EXERCISE": "НАВИГАЦИОННЫЕ УЧЕНИЯ",
+        "DANGER AREA": "ОПАСНАЯ ЗОНА",
+        "RESTRICTED AREA": "ЗОНА ОГРАНИЧЕНИЯ ПОЛЕТОВ",
+        "PROHIBITED AREA": "ЗАПРЕТНАЯ ЗОНА",
+        "GPS JAMMING": "ГЛУШЕНИЕ СИГНАЛА GPS",
+        "UPPER LIMIT": "ВЕРХНЯЯ ГРАНИЦА",
+        "LOWER LIMIT": "НИЖНЯЯ ГРАНИЦА",
+        "NOT AUTHORIZED": "НЕ РАЗРЕШЕНО / ЗАПРЕЩЕНО",
+        "RWY CLSD": "ВПП ЗАКРЫТА",
+        "TWY CLSD": "РД ЗАКРЫТА",
+        "UAS ACT": "АКТИВНОСТЬ БПЛА",
+        "JAMMING": "ГЛУШЕНИЕ/ПОМЕХИ",
+        "EXERCISE": "УЧЕНИЯ",
+        "MILITARY": "ВОЕННЫЙ/ВОЕННАЯ",
+        "UNMANNED": "БЕСПИЛОТНЫЙ",
+        "RESTRICTED": "ОГРАНИЧЕНО",
+        "PROHIBITED": "ЗАПРЕЩЕНО",
+        "DANGER": "ОПАСНОСТЬ",
+        "RADIUS": "РАДИУС",
+        "HEIGHT": "ВЫСОТА",
+        "ALTITUDE": "ВЫСОТА (ALT)",
+        "SURFACE": "ПОВЕРХНОСТЬ ЗЕМЛИ",
+        "GND": "ЗЕМЛЯ (GND)",
+        "SFC": "ПОВЕРХНОСТЬ (SFC)",
+        "AMSL": "НАД УРОВНЕМ МОРЯ",
+        "AGL": "НАД УРОВНЕМ ЗЕМЛИ",
+        "ACT": "АКТИВЕН / ДЕЙСТВУЕТ",
+        "WI": "В РАДИУСЕ / В ПРЕДЕЛАХ"
+    };
+
+    const airportICAO = {
+        "UUEE": "Шереметьево (Москва, Россия)",
+        "UUDD": "Домодедово (Москва, Россия)",
+        "UUWW": "Внуково (Москва, Россия)",
+        "ULLI": "Пулково (Санкт-Петербург, Россия)",
+        "URSS": "Сочи / Адлер (Россия)",
+        "USSS": "Кольцово (Екатеринбург, Россия)",
+        "UNNT": "Толмачево (Новосибирск, Россия)"
+    };
+
+    let activeDictObj = { ...defaultDictObj };
+    let activeDictionaryList = [];
+
+async function autoFetchDictionary() {
+    // Если файл открыт через локальный сервер (http/https)
+    if (window.location.protocol.startsWith('http')) {
+        try {
+            const response = await fetch('dictionary.json');
+            if (response.ok) {
+                activeDictObj = await response.json();
+                console.log('Словарь dictionary.json успешно загружен из папки!');
+            }
+        } catch (e) {
+            console.log('Не удалось подгрузить dictionary.json через fetch, используем встроенный.');
+        }
+    } else {
+        // Если файл открыт напрямую с диска (file:///)
+        console.warn('Файл открыт локально. Функция fetch() заблокирована политикой CORS браузера.');
+    }
+    
+    updateActiveList();
+}
+
+    function updateActiveList() {
+        activeDictionaryList = Object.entries(activeDictObj)
+            .map(([eng, rus]) => [eng.trim().toUpperCase(), rus.trim()])
+            .sort((a, b) => b[0].length - a[0].length);
+    }
+
+    function openDictModal() {
+        const text = Object.entries(activeDictObj)
+            .map(([k, v]) => `${k} = ${v}`)
+            .join('\n');
+        document.getElementById('dictInput').value = text;
+        document.getElementById('dictModal').style.display = 'flex';
+    }
+
+    function parseTextToDictObj(text) {
+        const result = {};
+        text.split('\n').forEach(line => {
+            if (line.includes('=')) {
+                const parts = line.split('=');
+                const key = parts[0].trim().toUpperCase();
+                const val = parts[1].trim();
+                if (key && val) result[key] = val;
+            }
+        });
+        return result;
+    }
+
+    function applyDictChanges() {
+        const text = document.getElementById('dictInput').value;
+        activeDictObj = parseTextToDictObj(text);
+        updateActiveList();
+        document.getElementById('dictModal').style.display = 'none';
+        if (workbookData) parseAndDisplay();
+    }
+
+    function downloadDictJson() {
+        const text = document.getElementById('dictInput').value;
+        const dictObj = parseTextToDictObj(text);
+        
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(dictObj, null, 4));
+        const downloadAnchor = document.createElement('a');
+        downloadAnchor.setAttribute("href", dataStr);
+        downloadAnchor.setAttribute("download", "dictionary.json");
+        document.body.appendChild(downloadAnchor);
+        downloadAnchor.click();
+        downloadAnchor.remove();
+    }
+
+    function loadDictFromFile(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const json = JSON.parse(e.target.result);
+                activeDictObj = json;
+                updateActiveList();
+                openDictModal();
+                if (workbookData) parseAndDisplay();
+            } catch (err) {
+                alert('Ошибка чтения файла JSON. Проверьте формат.');
+            }
+        };
+        reader.readAsText(file);
+    }
+
+    function resetDefaultDict() {
+        activeDictObj = { ...defaultDictObj };
+        updateActiveList();
+        openDictModal();
+        if (workbookData) parseAndDisplay();
+    }
+
+    const map = L.map('map').setView([57.0, 19.0], 5);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 18,
+        attribution: '© OpenStreetMap'
+    }).addTo(map);
+
+    let markersMap = {};
+    let parsedNotams = [];
+    let workbookData = null;
+
+    function handleFileSelect(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        document.getElementById('fileNameDisplay').innerText = `Загружен: ${file.name}`;
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+            const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+            const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+            workbookData = jsonData.map(row => row.join(' '));
+            parseAndDisplay();
+        };
+        reader.readAsArrayBuffer(file);
+    }
+
+    function parseCoordinates(text) {
+        const regex = /(\d{2})(\d{2})([NS])\s*(\d{3})(\d{2})([EW])/g;
+        let match = regex.exec(text);
+        if (match) {
+            let lat = parseInt(match[1]) + parseInt(match[2]) / 60;
+            if (match[3] === 'S') lat = -lat;
+            
+            let lon = parseInt(match[4]) + parseInt(match[5]) / 60;
+            if (match[6] === 'W') lon = -lon;
+
+            return [lat, lon];
+        }
+        return null;
+    }
+
+    function translateNOTAMFull(text) {
+        let trans = text;
+
+        trans = trans.replace(/\b(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\b/g, (m, y, mon, d, h, min) => {
+            return `<b style="color:#d69e2e;">20${y}-${mon}-${d} ${h}:${min} UTC</b>`;
+        });
+
+        trans = trans.replace(/\bQ\)\s*([A-Z0-9\/]+)/gi, '<br><b>[Квалификация Q]:</b> $1');
+        trans = trans.replace(/\bA\)\s*([A-Z0-9]{4})/gi, (m, code) => {
+            const name = airportICAO[code] ? ` (${airportICAO[code]})` : '';
+            return `<br><b>[Аэропорт / FIR]:</b> <span class="airport-tag">${code}</span><b>${name}</b>`;
+        });
+        trans = trans.replace(/\bB\)\s*(\S+)/gi, '<br><b>[Начало действия]:</b> $1');
+        trans = trans.replace(/\bC\)\s*(\S+)/gi, '<br><b>[Окончание действия]:</b> $1');
+        trans = trans.replace(/\bD\)\s*(.+?)(?=(E\)|F\)|G\)|$))/gi, '<br><b>[График / Расписание]:</b> $1');
+        
+        trans = trans.replace(/\bF\)\s*(\S+)/gi, (m, val) => {
+            let desc = val;
+            if (val.startsWith('FL')) desc += ` (эшелон ${val.replace('FL','')})`;
+            else if (val === 'SFC' || val === 'GND') desc += ' (Поверхность земли)';
+            return `<br><b>[Нижняя граница]:</b> ${desc}`;
+        });
+
+        trans = trans.replace(/\bG\)\s*(\S+)/gi, (m, val) => {
+            let desc = val;
+            if (val.startsWith('FL')) desc += ` (эшелон ${val.replace('FL','')})`;
+            else if (val.endsWith('FT') || val.endsWith('AMS')) desc += ` (высота над ур. моря)`;
+            return `<br><b>[Верхняя граница]:</b> ${desc}`;
+        });
+
+        trans = trans.replace(/\bE\)\s*/gi, '<br><br><b>[Текст уведомления (Раздел E)]:</b><br>');
+
+        activeDictionaryList.forEach(([eng, rus]) => {
+            const reg = new RegExp(`\\b${eng}\\b`, 'gi');
+            trans = trans.replace(reg, `<span class="custom-term">${rus}</span>`);
+        });
+
+        trans = trans.replace(/\bFL(\d+)\b/gi, '<b>эшелон FL$1</b>');
+        trans = trans.replace(/\b(\d+)FT\b/gi, '<b>$1 футов</b>');
+        trans = trans.replace(/\b(\d+)NM\b/gi, '<b>$1 морских миль</b>');
+
+        return trans;
+    }
+
+    function extractAirports(text) {
+        const regex = /\bA\)\s*([A-Z0-9]{4})\b/gi;
+        let match = regex.exec(text);
+        let airports = [];
+
+        while (match !== null) {
+            const code = match[1];
+            const info = airportICAO[code] || "Наименование аэродрома / FIR отсутствует в базе";
+            airports.push({ code, info });
+            match = regex.exec(text);
+        }
+        return airports;
+    }
+
+    function selectNOTAM(id) {
+        document.querySelectorAll('.notam-card').forEach(el => el.classList.remove('selected'));
+
+        const card = document.getElementById(`card-${id}`);
+        if (card) {
+            card.classList.add('selected');
+            card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        const item = parsedNotams.find(n => n.id === id);
+        if (!item) return;
+
+        const detailContainer = document.getElementById('detailView');
+        
+        let airportsHtml = item.airports.map(a => 
+            `<div><span class="airport-tag">${a.code}</span> — <b>${a.info}</b></div>`
+        ).join('') || '<i>Код аэродрома (поле A) не найден</i>';
+
+        detailContainer.innerHTML = `
+            <div class="detail-box">
+                <div class="detail-section">
+                    <div class="detail-title">📍 Аэродром / Зона ответственности</div>
+                    ${airportsHtml}
+                </div>
+
+                <div class="detail-section">
+                    <div class="detail-title">📝 Перевод с использованием словаря (JSON)</div>
+                    <div class="translated-text">${item.translated}</div>
+                </div>
+
+                <div class="detail-section">
+                    <div class="detail-title">📄 Исходный текст NOTAM (ICAO)</div>
+                    <div style="font-family: monospace; white-space: pre-wrap; font-size:12px; color:#4a5568;">${item.original}</div>
+                </div>
+            </div>
+        `;
+
+        if (markersMap[id]) {
+            const marker = markersMap[id];
+            map.setView(marker.getLatLng(), 8, { animate: true });
+            marker.openPopup();
+        }
+    }
+
+    function parseAndDisplay() {
+        if (!workbookData) return;
+
+        Object.values(markersMap).forEach(m => map.removeLayer(m));
+        markersMap = {};
+        parsedNotams = [];
+
+        const keywordsInput = document.getElementById('keywords').value;
+        const keywords = keywordsInput.split(',').map(k => k.trim().toUpperCase()).filter(k => k);
+
+        const listContainer = document.getElementById('notamList');
+        listContainer.innerHTML = '';
+
+        let foundCount = 0;
+        let allMarkers = [];
+
+        workbookData.forEach((rowText, index) => {
+            if (!rowText || typeof rowText !== 'string') return;
+            const upperText = rowText.toUpperCase();
+
+            const hasKeyword = keywords.some(kw => upperText.includes(kw));
+
+            if (hasKeyword) {
+                foundCount++;
+                const notamId = `notam_${index}`;
+
+                let highlightedOrig = rowText;
+                keywords.forEach(kw => {
+                    const reg = new RegExp(`(${kw})`, 'gi');
+                    highlightedOrig = highlightedOrig.replace(reg, '<span class="highlight">$1</span>');
+                });
+
+                const translated = translateNOTAMFull(rowText);
+                const coords = parseCoordinates(rowText);
+                const airports = extractAirports(rowText);
+
+                parsedNotams.push({
+                    id: notamId,
+                    original: rowText,
+                    translated: translated,
+                    coords: coords,
+                    airports: airports
+                });
+
+                const badgeHtml = coords 
+                    ? '<span class="coords-badge">📍 На карте</span>' 
+                    : '<span class="no-coords-badge">Без координат</span>';
+
+                const card = document.createElement('div');
+                card.id = `card-${notamId}`;
+                card.className = 'notam-card';
+                card.innerHTML = `${badgeHtml}${highlightedOrig}`;
+                card.onclick = () => selectNOTAM(notamId);
+                listContainer.appendChild(card);
+
+                if (coords) {
+                    const marker = L.marker(coords).addTo(map)
+                        .bindPopup(`<b>NOTAM #${foundCount}</b><br><div style="max-height:120px; overflow-y:auto; font-size:12px;">${translated}</div>`);
+                    
+                    marker.on('click', () => selectNOTAM(notamId));
+                    markersMap[notamId] = marker;
+                    allMarkers.push(marker);
+                }
+            }
+        });
+
+        document.getElementById('count').innerText = foundCount;
+
+        if (allMarkers.length > 0) {
+            const group = new L.featureGroup(allMarkers);
+            map.fitBounds(group.getBounds().pad(0.15));
+        }
+
+        if (parsedNotams.length > 0) {
+            selectNOTAM(parsedNotams[0].id);
+        } else {
+            document.getElementById('detailView').innerHTML = '<div style="color: #a0aec0; text-align: center; margin-top: 40px; font-size: 13px;">Ничего не найдено</div>';
+        }
+    }
+
+    autoFetchDictionary();
+</script>
+
+</body>
+</html>
